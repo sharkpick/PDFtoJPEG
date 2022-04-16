@@ -32,6 +32,16 @@ var (
 	}
 )
 
+func trimFilename(filename string) string {
+	var results string
+	for i := range filename {
+		if filename[i] != ' ' && filename[i] != '\t' {
+			results += string(filename[i])
+		}
+	}
+	return results
+}
+
 func compressResults(session *Session) {
 	cmd := exec.Command("zip", "-r", session.ZipTarget(), "extracted_pdfs"+"/")
 	cmd.Dir = session.Workspace()
@@ -63,18 +73,18 @@ func processPDFS(session *Session) {
 
 func doUploadImage(w http.ResponseWriter, r *http.Request) {
 	session := NewSession(r.RemoteAddr)
-	defer session.Cleanup()
+	//defer session.Cleanup()
 	r.ParseMultipartForm(10 << 20)
 	formData := r.MultipartForm
 	files := formData.File["file"]
+	fmt.Println("doUploadImage()")
 	for i, h := range files {
 		file, err := files[i].Open()
 		if err != nil {
 			log.Fatalln("Fatal Error opening input file", h.Filename, err)
 		}
 		defer file.Close()
-		out, err := os.OpenFile(session.Workspace()+h.Filename, os.O_CREATE|os.O_WRONLY, 0644)
-		//out, err := ioutil.TempFile(session.Workspace(), "file*"+path.Ext(h.Filename))
+		out, err := os.OpenFile(session.Workspace()+trimFilename(h.Filename), os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Fatalln("Fatal Error creating output file:", err)
 		}
@@ -104,6 +114,7 @@ func doUploadImage(w http.ResponseWriter, r *http.Request) {
 func doIndex(w http.ResponseWriter, r *http.Request) {
 	//session := NewSession(r.RemoteAddr)
 	//log.Println(session)
+	log.Println("doIndex()")
 	file, err := os.ReadFile(IndexFile)
 	if err != nil {
 		log.Fatalln("Fatal Error:", IndexFile, "not found.", err)
@@ -113,7 +124,7 @@ func doIndex(w http.ResponseWriter, r *http.Request) {
 
 func setupHandlers() {
 	http.HandleFunc("/", doIndex)
-	http.HandleFunc("/upload/image", doUploadImage)
+	http.HandleFunc("/upload", doUploadImage)
 }
 
 func main() {

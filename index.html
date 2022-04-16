@@ -8,6 +8,9 @@
   </head>
   <body>
     <h1>Upload PDFs</h1>
+    {{ if .Message }}
+      {{ .Message }}<br><br>
+    {{ end }}    
     <form action="/upload" enctype="multipart/form-data" method="post">
         <input type="file" name="file" id="file" multiple />
         <input type="submit" value="upload" />

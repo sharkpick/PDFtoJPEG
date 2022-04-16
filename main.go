@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"mime"
@@ -43,13 +43,16 @@ func trimFilename(filename string) string {
 }
 
 func compressResults(session *Session) {
+	if _, err := os.Stat(session.ExtractedPDFDirectory()); err != nil {
+		return
+	}
 	cmd := exec.Command("zip", "-r", session.ZipTarget(), "extracted_pdfs"+"/")
 	cmd.Dir = session.Workspace()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Fatalln("Fatal Error:", err)
 	}
-	fmt.Println(string(out))
+	log.Println(string(out))
 }
 
 func processPDFS(session *Session) {
@@ -71,14 +74,19 @@ func processPDFS(session *Session) {
 	}
 }
 
+type ErrorStruct struct {
+	Message string
+}
+
 func doUploadImage(w http.ResponseWriter, r *http.Request) {
 	session := NewSession(r.RemoteAddr)
 	//defer session.Cleanup()
 	r.ParseMultipartForm(10 << 20)
 	formData := r.MultipartForm
 	files := formData.File["file"]
-	fmt.Println("doUploadImage()")
+	log.Println("doUploadImage()")
 	for i, h := range files {
+		log.Println(h.Filename)
 		file, err := files[i].Open()
 		if err != nil {
 			log.Fatalln("Fatal Error opening input file", h.Filename, err)
@@ -93,33 +101,39 @@ func doUploadImage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Fatalln("Fatal Error copying to output", err)
 		}
-		fmt.Println("Successfully uploaded", out.Name())
+		log.Println("Successfully uploaded", out.Name())
 	}
-	fmt.Println("Finished doUploadImage")
+	log.Println("Finished doUploadImage")
 	processPDFS(session)
 	compressResults(session)
-	theFile, err := os.Open(session.ZipTarget())
-	if err != nil {
-		log.Fatalln("Fatal Error reading .zip", err)
+	if _, err := os.Stat(session.ZipTarget()); err != nil {
+		file, err := template.ParseFiles(IndexFile)
+		if err != nil {
+			log.Fatalln("Fatal Error parsing", IndexFile, "from doUploadImages:", err)
+		}
+		err = file.Execute(w, ErrorStruct{"Error: no .pdf files uploaded. Please try again"})
+		if err != nil {
+			log.Fatalln("Fatal Error executing", IndexFile, "from doUploadImages", err)
+		}
+	} else {
+		theFile, err := os.Open(session.ZipTarget())
+		if err != nil {
+			log.Fatalln("Fatal Error reading .zip", err)
+		}
+		defer theFile.Close()
+		w.Header().Set("Content-Type", "application/octet-stream")
+		cd := mime.FormatMediaType("attachment", map[string]string{"filename": "extracted_images.zip"})
+		w.Header().Set("Content-Disposition", cd)
+		http.ServeContent(w, r, session.ZipTarget(), time.Now(), theFile)
 	}
-	defer theFile.Close()
-	//w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	cd := mime.FormatMediaType("attachment", map[string]string{"filename": "extracted_images.zip"})
-	//w.Header().Set("Content-Disposition", "attachment; filename=extracted_images.zip")
-	w.Header().Set("Content-Disposition", cd)
-	http.ServeContent(w, r, session.ZipTarget(), time.Now(), theFile)
 }
 
 func doIndex(w http.ResponseWriter, r *http.Request) {
-	//session := NewSession(r.RemoteAddr)
-	//log.Println(session)
-	log.Println("doIndex()")
-	file, err := os.ReadFile(IndexFile)
+	file, err := template.ParseFiles(IndexFile)
 	if err != nil {
 		log.Fatalln("Fatal Error:", IndexFile, "not found.", err)
 	}
-	w.Write(file)
+	file.Execute(w, nil)
 }
 
 func setupHandlers() {
@@ -129,5 +143,11 @@ func setupHandlers() {
 
 func main() {
 	setupHandlers()
+	logFile, err := os.OpenFile("api.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalln("Fatal Error creating api.log", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
 	log.Fatalln(Server.ListenAndServe())
 }
